@@ -83,6 +83,7 @@ export function OwlCallWidget() {
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<OwlCallState>('closed');
   const [log, setLog] = useState<string[]>([]);
+  const [visionCaption, setVisionCaption] = useState<string | null>(null);
 
   const statusText = useMemo(() => {
     if (!open) return 'closed';
@@ -154,11 +155,11 @@ export function OwlCallWidget() {
               <button
                 style={styles.btn}
                 onClick={() => {
-                  append(`[ui] toggle vision`);
+                  const ts = new Date().toISOString();
+                  setVisionCaption(`Captured ${ts}: a cat on a sofa`);
+                  append(`[vision] capture (stub) @ ${ts}`);
                 }}
-              >
-                Vision
-              </button>
+              >Capture</button>
               <button
                 style={styles.btn}
                 onClick={() => {
@@ -171,6 +172,7 @@ export function OwlCallWidget() {
             </div>
 
             <div style={styles.transcript}>
+              {visionCaption ? `vision: ${visionCaption}\n\n` : ''}
               {log.length ? log.join('\n') : 'Transcript / event log…'}
             </div>
           </div>
