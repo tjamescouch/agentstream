@@ -1,5 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import type { OwlCallState } from './types';
+import { localTtsStub } from '../tts/localTts';
+import { scheduleLipSync } from '../lipsync/scheduleLipSync';
 
 const styles: Record<string, React.CSSProperties> = {
   shell: {
@@ -84,6 +86,9 @@ export function OwlCallWidget() {
   const [state, setState] = useState<OwlCallState>('closed');
   const [log, setLog] = useState<string[]>([]);
 
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const lipSyncStopRef = useRef<null | (() => void)>(null);
+
   const statusText = useMemo(() => {
     if (!open) return 'closed';
     return state;
@@ -91,6 +96,61 @@ export function OwlCallWidget() {
 
   function append(msg: string) {
     setLog((prev) => [...prev.slice(-100), msg]);
+  }
+
+  async function stopAll(reason = 'stop') {
+    append(`[ui] stop all (${reason})`);
+    lipSyncStopRef.current?.();
+    lipSyncStopRef.current = null;
+
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+
+    setState('idle');
+  }
+
+  async function speakOnce() {
+    const tts = localTtsStub('hello');
+    append(`[tts] audio=${tts.audio.kind}:${tts.audio.url}`);
+
+    // Ensure we stop prior playback.
+    await stopAll('speak');
+
+    const audio = new Audio(tts.audio.url);
+    audioRef.current = audio;
+
+    if (tts.visemes?.length) {
+      const ctl = scheduleLipSync({
+        frames: tts.visemes,
+        sink: {
+          onFrame: (f) => append(`[viseme] t=${f.t.toFixed(2)} ${JSON.stringify(f.weights)}`),
+        },
+      });
+      lipSyncStopRef.current = ctl.stop;
+      void ctl.done.then(() => append('[viseme] done'));
+    }
+
+    setState('speaking');
+    append('[tts] play');
+
+    try {
+      await audio.play();
+    } catch (err) {
+      append(`[tts] play failed: ${String(err)}`);
+      setState('error');
+      return;
+    }
+
+    audio.addEventListener(
+      'ended',
+      () => {
+        append('[tts] ended');
+        void stopAll('ended');
+      },
+      { once: true }
+    );
   }
 
   return (
@@ -101,7 +161,7 @@ export function OwlCallWidget() {
           onClick={() => {
             setOpen(true);
             setState('idle');
-            append(`[ui] open`);
+            append('[ui] open');
           }}
         >
           Open OWL
@@ -118,7 +178,7 @@ export function OwlCallWidget() {
               onClick={() => {
                 setOpen(false);
                 setState('closed');
-                append(`[ui] close`);
+                append('[ui] close');
               }}
             >
               Close
@@ -137,7 +197,7 @@ export function OwlCallWidget() {
                 style={styles.btn}
                 onClick={() => {
                   setState((s) => nextStateForToggle(s, 'listening'));
-                  append(`[ui] toggle listen`);
+                  append('[ui] toggle listen');
                 }}
               >
                 Listen (STT)
@@ -145,8 +205,7 @@ export function OwlCallWidget() {
               <button
                 style={styles.btn}
                 onClick={() => {
-                  setState((s) => nextStateForToggle(s, 'speaking'));
-                  append(`[ui] toggle speak`);
+                  void speakOnce();
                 }}
               >
                 Speak (TTS)
@@ -154,7 +213,7 @@ export function OwlCallWidget() {
               <button
                 style={styles.btn}
                 onClick={() => {
-                  append(`[ui] toggle vision`);
+                  append('[ui] toggle vision');
                 }}
               >
                 Vision
@@ -162,8 +221,7 @@ export function OwlCallWidget() {
               <button
                 style={styles.btn}
                 onClick={() => {
-                  setState('idle');
-                  append(`[ui] stop all`);
+                  void stopAll('button');
                 }}
               >
                 Stop
