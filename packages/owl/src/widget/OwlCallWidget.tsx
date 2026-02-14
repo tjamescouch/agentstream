@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { OwlCallState } from './types';
 
 const styles: Record<string, React.CSSProperties> = {
@@ -83,6 +83,9 @@ export function OwlCallWidget() {
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<OwlCallState>('closed');
   const [log, setLog] = useState<string[]>([]);
+  const [sttTranscript, setSttTranscript] = useState('');
+
+  const sttTimerRef = useRef<null | number>(null);
 
   const statusText = useMemo(() => {
     if (!open) return 'closed';
@@ -92,6 +95,31 @@ export function OwlCallWidget() {
   function append(msg: string) {
     setLog((prev) => [...prev.slice(-100), msg]);
   }
+
+
+  function stopStt(reason = 'stop') {
+    if (sttTimerRef.current != null) {
+      window.clearInterval(sttTimerRef.current);
+      sttTimerRef.current = null;
+    }
+    append(`[stt] stop (${reason})`);
+  }
+
+  function startStt() {
+    stopStt('restart');
+    append('[stt] start (stub)');
+    const words = ['hello', 'world', 'this', 'is', 'owl', 'stt', 'stub'];
+    let i = 0;
+    sttTimerRef.current = window.setInterval(() => {
+      const w = words[i % words.length];
+      i += 1;
+      setSttTranscript((t) => (t ? `${t} ${w}` : w));
+    }, 500);
+  }
+
+  useEffect(() => {
+    return () => stopStt('unmount');
+  }, []);
 
   return (
     <div style={styles.shell}>
@@ -171,7 +199,7 @@ export function OwlCallWidget() {
             </div>
 
             <div style={styles.transcript}>
-              {log.length ? log.join('\n') : 'Transcript / event log…'}
+              {sttTranscript ? `stt: ${sttTranscript}\n\n` : ''}{log.length ? log.join('\n') : 'Transcript / event log…'}
             </div>
           </div>
         </div>
