@@ -83,6 +83,7 @@ export function OwlCallWidget() {
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<OwlCallState>('closed');
   const [log, setLog] = useState<string[]>([]);
+  const [visionCaption, setVisionCaption] = useState<string | null>(null);
 
   const statusText = useMemo(() => {
     if (!open) return 'closed';
@@ -154,7 +155,10 @@ export function OwlCallWidget() {
               <button
                 style={styles.btn}
                 onClick={() => {
-                  append(`[ui] toggle vision`);
+                  const ts = new Date().toISOString();
+                  const caption = `(stub) detected: person at desk @ ${ts}`;
+                  setVisionCaption(caption);
+                  append(`[vision] capture: ${caption}`);
                 }}
               >
                 Vision
@@ -171,7 +175,7 @@ export function OwlCallWidget() {
             </div>
 
             <div style={styles.transcript}>
-              {log.length ? log.join('\n') : 'Transcript / event log…'}
+              {visionCaption ? `vision: ${visionCaption}\n` : ''}{log.length ? log.join('\n') : 'Transcript / event log…'}
             </div>
           </div>
         </div>
