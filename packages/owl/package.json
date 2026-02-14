@@ -4,6 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "main": "./src/index.ts",
+  "scripts": {
+    "build": "echo 'owl: no build step'"
+  },
   "dependencies": {
     "react": "^18.3.1"
   }

@@ -1,5 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { OwlCallState } from './types';
+import { localTtsStub } from '../tts/localTts';
+import { scheduleLipSync } from '../lipsync/scheduleLipSync';
 
 const styles: Record<string, React.CSSProperties> = {
   shell: {
@@ -83,7 +85,12 @@ export function OwlCallWidget() {
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<OwlCallState>('closed');
   const [log, setLog] = useState<string[]>([]);
-  const [visionCaption, setVisionCaption] = useState<string | null>(null);
+  const [sttTranscript, setSttTranscript] = useState('');
+
+  const sttTimerRef = useRef<null | number>(null);
+
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const lipSyncStopRef = useRef<null | (() => void)>(null);
 
   const statusText = useMemo(() => {
     if (!open) return 'closed';
@@ -94,6 +101,87 @@ export function OwlCallWidget() {
     setLog((prev) => [...prev.slice(-100), msg]);
   }
 
+  function stopStt(reason = 'stop') {
+    if (sttTimerRef.current != null) {
+      window.clearInterval(sttTimerRef.current);
+      sttTimerRef.current = null;
+    }
+    append(`[stt] stop (${reason})`);
+  }
+
+  function startStt() {
+    stopStt('restart');
+    append('[stt] start (stub)');
+    const words = ['hello', 'world', 'this', 'is', 'owl', 'stt', 'stub'];
+    let i = 0;
+    sttTimerRef.current = window.setInterval(() => {
+      const w = words[i % words.length];
+      i += 1;
+      setSttTranscript((t) => (t ? `${t} ${w}` : w));
+    }, 500);
+  }
+
+  useEffect(() => {
+    return () => stopStt('unmount');
+  }, []);
+
+  async function stopAll(reason = 'stop') {
+    append(`[ui] stop all (${reason})`);
+    stopStt('stopAll');
+
+    lipSyncStopRef.current?.();
+    lipSyncStopRef.current = null;
+
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+
+    setState('idle');
+  }
+
+  async function speakOnce() {
+    const tts = localTtsStub('hello');
+    append(`[tts] audio=${tts.audio.kind}:${tts.audio.url}`);
+
+    // Ensure we stop prior playback.
+    await stopAll('speak');
+
+    const audio = new Audio(tts.audio.url);
+    audioRef.current = audio;
+
+    if (tts.visemes?.length) {
+      const ctl = scheduleLipSync({
+        frames: tts.visemes,
+        sink: {
+          onFrame: (f) => append(`[viseme] t=${f.t.toFixed(2)} ${JSON.stringify(f.weights)}`),
+        },
+      });
+      lipSyncStopRef.current = ctl.stop;
+      void ctl.done.then(() => append('[viseme] done'));
+    }
+
+    setState('speaking');
+    append('[tts] play');
+
+    try {
+      await audio.play();
+    } catch (err) {
+      append(`[tts] play failed: ${String(err)}`);
+      setState('error');
+      return;
+    }
+
+    audio.addEventListener(
+      'ended',
+      () => {
+        append('[tts] ended');
+        void stopAll('ended');
+      },
+      { once: true }
+    );
+  }
+
   return (
     <div style={styles.shell}>
       {!open ? (
@@ -102,7 +190,7 @@ export function OwlCallWidget() {
           onClick={() => {
             setOpen(true);
             setState('idle');
-            append(`[ui] open`);
+            append('[ui] open');
           }}
         >
           Open OWL
@@ -119,7 +207,7 @@ export function OwlCallWidget() {
               onClick={() => {
                 setOpen(false);
                 setState('closed');
-                append(`[ui] close`);
+                append('[ui] close');
               }}
             >
               Close
@@ -137,8 +225,13 @@ export function OwlCallWidget() {
               <button
                 style={styles.btn}
                 onClick={() => {
-                  setState((s) => nextStateForToggle(s, 'listening'));
-                  append(`[ui] toggle listen`);
+                  setState((s) => {
+                    const next = nextStateForToggle(s, 'listening');
+                    if (next === 'listening') startStt();
+                    else stopStt('toggle');
+                    return next;
+                  });
+                  append('[ui] toggle listen (stub)');
                 }}
               >
                 Listen (STT)
@@ -146,8 +239,7 @@ export function OwlCallWidget() {
               <button
                 style={styles.btn}
                 onClick={() => {
-                  setState((s) => nextStateForToggle(s, 'speaking'));
-                  append(`[ui] toggle speak`);
+                  void speakOnce();
                 }}
               >
                 Speak (TTS)
@@ -155,10 +247,7 @@ export function OwlCallWidget() {
               <button
                 style={styles.btn}
                 onClick={() => {
-                  const ts = new Date().toISOString();
-                  const caption = `(stub) detected: person at desk @ ${ts}`;
-                  setVisionCaption(caption);
-                  append(`[vision] capture: ${caption}`);
+                  append('[ui] toggle vision');
                 }}
               >
                 Vision
@@ -166,8 +255,7 @@ export function OwlCallWidget() {
               <button
                 style={styles.btn}
                 onClick={() => {
-                  setState('idle');
-                  append(`[ui] stop all`);
+                  void stopAll('button');
                 }}
               >
                 Stop
@@ -175,7 +263,7 @@ export function OwlCallWidget() {
             </div>
 
             <div style={styles.transcript}>
-              {visionCaption ? `vision: ${visionCaption}\n` : ''}{log.length ? log.join('\n') : 'Transcript / event log…'}
+              {sttTranscript ? `stt: ${sttTranscript}\n\n` : ''}{log.length ? log.join('\n') : 'Transcript / event log…'}
             </div>
           </div>
         </div>
